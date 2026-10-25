@@ -556,6 +556,73 @@ def test_RosdepLookup_resolve_all_errors():
     assert 'not_a_resource' in errors, errors
 
 
+def test_RosdepLookup_resolve_all_collects_all_errors():
+    from rosdep2.installers import InstallerContext
+    from rosdep2.lookup import RosdepLookup, ResolutionError
+    import rospkg
+    rospack, rosstack = get_test_rospkgs()
+    sources_loader = create_test_SourcesListLoader()
+    lookup = RosdepLookup.create_from_rospkg(rospack=rospack, rosstack=rosstack,
+                                             sources_loader=sources_loader)
+    # the installer context has nothing in it, so every key fails to resolve
+    installer_context = InstallerContext()
+    installer_context.set_os_override('ubuntu', 'lucid')
+
+    # roscpp_fake declares two rosdep keys (testboost and testlibtool):
+    # both failures must be reported, not just the last one
+    resolutions, errors = lookup.resolve_all(['roscpp_fake'], installer_context)
+    assert 'roscpp_fake' in errors
+    roscpp_errors = errors['roscpp_fake']
+    assert isinstance(roscpp_errors, list)
+    assert len(roscpp_errors) == 2, roscpp_errors
+    assert all(isinstance(e, ResolutionError) for e in roscpp_errors)
+    assert set(e.rosdep_key for e in roscpp_errors) == set(['testboost', 'testlibtool'])
+
+    # a missing resource is reported as a single-item list as well
+    resolutions, errors = lookup.resolve_all(['not_a_resource'], installer_context)
+    assert 'not_a_resource' in errors
+    assert len(errors['not_a_resource']) == 1
+    assert isinstance(errors['not_a_resource'][0], rospkg.ResourceNotFound)
+
+    # errors for one resource do not hide the resolutions of another
+    from rosdep2 import create_default_installer_context
+    installer_context = create_default_installer_context()
+    installer_context.set_os_override('ubuntu', 'lucid')
+    resolutions, errors = lookup.resolve_all(
+        ['rospack_fake', 'not_a_resource'], installer_context)
+    assert 'rospack_fake' not in errors
+    assert 'not_a_resource' in errors
+    assert resolutions, resolutions
+
+
+def test_RosdepLookup_resolve_all_collects_dependency_errors():
+    from unittest.mock import patch
+    from rosdep2.installers import InstallerContext
+    from rosdep2.lookup import RosdepLookup, ResolutionError
+    rospack, rosstack = get_test_rospkgs()
+    sources_loader = create_test_SourcesListLoader()
+    lookup = RosdepLookup.create_from_rospkg(rospack=rospack, rosstack=rosstack,
+                                             sources_loader=sources_loader)
+    installer_context = InstallerContext()
+    installer_context.set_os_override('ubuntu', 'lucid')
+
+    def fake_resolve(rosdep_key, resource_name, installer_context):
+        if rosdep_key == 'good_key':
+            return 'apt', ['good-pkg'], ['bad_dep_a', 'bad_dep_b']
+        raise ResolutionError(rosdep_key, None, 'ubuntu', 'lucid',
+                              'Cannot locate rosdep definition for [%s]' % (rosdep_key))
+
+    with patch.object(lookup, 'get_rosdeps', return_value=['good_key']):
+        with patch.object(lookup, 'resolve', side_effect=fake_resolve):
+            resolutions, errors = lookup.resolve_all(['some_resource'], installer_context)
+
+    # the key itself resolved, and both failing dependencies were collected
+    assert ('apt', ['good-pkg']) in resolutions, resolutions
+    dep_errors = errors['some_resource']
+    assert len(dep_errors) == 2, dep_errors
+    assert set(e.rosdep_key for e in dep_errors) == set(['bad_dep_a', 'bad_dep_b'])
+
+
 def test_RosdepLookup_resolve_errors():
     from rosdep2.installers import InstallerContext
     from rosdep2.lookup import RosdepLookup, ResolutionError

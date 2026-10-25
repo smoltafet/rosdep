@@ -388,10 +388,13 @@ class RosdepLookup(object):
         :param implicit: Install implicit (recursive) dependencies of
             resources.  Default ``False``.
 
-        :returns: (resolutions, errors), ``([(str, [str])], {str: ResolutionError})``.  resolutions provides
+        :returns: (resolutions, errors), ``([(str, [str])], {str: [ResolutionError]})``.  resolutions provides
           an ordered list of resolution tuples.  A resolution tuple's first element is the installer
           key (e.g.: apt or homebrew) and the second element is a list of opaque resolution values for that
-          installer. errors maps package names to an :exc:`ResolutionError` or :exc:`KeyError` exception.
+          installer. errors maps package names to the list of errors encountered while resolving that
+          package: :exc:`ResolutionError` exceptions for keys that could not be resolved, or a
+          :exc:`rospkg.ResourceNotFound` exception if the package itself could not be located. All
+          resolution errors are collected, not just the last one for each package.
 
         :raises: :exc:`RosdepInternalError` if unexpected error in constructing dependency graph
         :raises: :exc:`InvalidData` if a cycle occurs in constructing dependency graph
@@ -410,25 +413,44 @@ class RosdepLookup(object):
                     try:
                         installer_key, resolution, dependencies = \
                             self.resolve(rosdep_key, resource_name, installer_context)
-                        depend_graph[rosdep_key]['installer_key'] = installer_key
-                        depend_graph[rosdep_key]['install_keys'] = list(resolution)
-                        depend_graph[rosdep_key]['dependencies'] = list(dependencies)
-                        while dependencies:
-                            depend_rosdep_key = dependencies.pop()
-                            # prevent infinite loop
-                            if depend_rosdep_key in depend_graph:
-                                continue
+                    except ResolutionError as e:
+                        # collect the error and keep resolving the
+                        # remaining keys so that all resolution errors
+                        # for this resource are reported, not just one
+                        errors.setdefault(resource_name, []).append(e)
+                        continue
+                    depend_graph[rosdep_key]['installer_key'] = installer_key
+                    depend_graph[rosdep_key]['install_keys'] = list(resolution)
+                    depend_graph[rosdep_key]['dependencies'] = list(dependencies)
+                    while dependencies:
+                        depend_rosdep_key = dependencies.pop()
+                        # prevent infinite loop
+                        if depend_rosdep_key in depend_graph:
+                            continue
+                        try:
                             installer_key, resolution, more_dependencies = \
                                 self.resolve(depend_rosdep_key, resource_name, installer_context)
-                            dependencies.extend(more_dependencies)
-                            depend_graph[depend_rosdep_key]['installer_key'] = installer_key
-                            depend_graph[depend_rosdep_key]['install_keys'] = list(resolution)
-                            depend_graph[depend_rosdep_key]['dependencies'] = list(more_dependencies)
-
-                    except ResolutionError as e:
-                        errors[resource_name] = e
+                        except ResolutionError as e:
+                            errors.setdefault(resource_name, []).append(e)
+                            continue
+                        dependencies.extend(more_dependencies)
+                        depend_graph[depend_rosdep_key]['installer_key'] = installer_key
+                        depend_graph[depend_rosdep_key]['install_keys'] = list(resolution)
+                        depend_graph[depend_rosdep_key]['dependencies'] = list(more_dependencies)
             except ResourceNotFound as e:
-                errors[resource_name] = e
+                errors.setdefault(resource_name, []).append(e)
+
+        # Keys that failed to resolve never entered the graph. Drop them
+        # from the dependency lists of the keys that did resolve, so that
+        # validating the graph does not fail on them; their errors have
+        # already been collected above. Previously a single failed
+        # dependency aborted the whole call with a RosdepInternalError,
+        # hiding every other error.
+        for entry in depend_graph.values():
+            if 'dependencies' in entry:
+                entry['dependencies'] = [
+                    depend_key for depend_key in entry['dependencies']
+                    if depend_key in depend_graph]
 
         try:
             # TODO: I really don't like AssertionErrors here; this should be modeled as 'CyclicGraphError'

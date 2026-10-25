@@ -430,7 +430,9 @@ class RosdepInstaller(object):
         :param implicit: Install implicit (recursive) dependencies of
             resources.  Default ``False``.
 
-        :returns: (uninstalled, errors), ``({str: [opaque]}, {str: ResolutionError})``.
+        :returns: (uninstalled, errors), ``({str: [opaque]}, {str: [ResolutionError]})``.
+          errors maps package names to the list of resolution errors for that package,
+          see :meth:`RosdepLookup.resolve_all`.
           Uninstalled is a dictionary with the installer_key as the key.
         :raises: :exc:`RosdepInternalError`
         """

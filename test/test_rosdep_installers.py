@@ -539,7 +539,7 @@ def test_RosdepInstaller_get_uninstalled_unconfigured():
         assert not uninstalled, uninstalled
         assert set(errors.keys()) == set(['roscpp_fake', 'stack1_p1'])
         print(errors)
-        assert isinstance(errors['roscpp_fake'], ResolutionError), errors['roscpp_fake'][0]
+        assert isinstance(errors['roscpp_fake'][0], ResolutionError), errors['roscpp_fake'][0]
 
     # fake/bad installer to test that we re-cast general installer issues
     class BadInstaller(PackageManagerInstaller):

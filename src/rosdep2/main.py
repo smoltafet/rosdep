@@ -746,11 +746,12 @@ def command_check(lookup, packages, options):
     else:
         print('All system dependencies have been satisfied')
     if errors:
-        for package_name, ex in errors.items():
-            if isinstance(ex, rospkg.ResourceNotFound):
-                print('ERROR[%s]: resource not found [%s]' % (package_name, ex.args[0]), file=sys.stderr)
-            else:
-                print('ERROR[%s]: %s' % (package_name, ex), file=sys.stderr)
+        for package_name, package_errors in errors.items():
+            for ex in package_errors:
+                if isinstance(ex, rospkg.ResourceNotFound):
+                    print('ERROR[%s]: resource not found [%s]' % (package_name, ex.args[0]), file=sys.stderr)
+                else:
+                    print('ERROR[%s]: %s' % (package_name, ex), file=sys.stderr)
     if uninstalled:
         return 1
     elif errors:
@@ -805,8 +806,9 @@ def command_install(lookup, packages, options):
                 'e.g. `--rosdistro indigo`)'
             )
         print(err_msg + ':', file=sys.stderr)
-        for rosdep_key, error in errors.items():
-            print('%s: %s' % (rosdep_key, error_to_human_readable(error)), file=sys.stderr)
+        for rosdep_key, rosdep_errors in errors.items():
+            for error in rosdep_errors:
+                print('%s: %s' % (rosdep_key, error_to_human_readable(error)), file=sys.stderr)
         if options.robust:
             print('Continuing to install resolvable dependencies...', file=sys.stderr)
         else:
